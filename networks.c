@@ -1,5 +1,5 @@
 
-// Hugh Smith April 2017
+// Base code provided by Hugh Smith; modified by Nick Spencer
 // Network code to support TCP/UDP client and server connections
 
 #include <stdio.h>
@@ -74,12 +74,14 @@ int safeSelect(int socketNum, int seconds, int *triesLeft)
    fd_set sockets;
    struct timeval timeout;
    struct timeval *timeoutPtr = NULL;
+   
    /* There must be tries left, otherwise the process will end */
    if (*triesLeft <= 0)
    {
       return TRIES_FINISHED;
    }
    (*triesLeft)--;
+   
    /* Set the amount of time to wait for a packet */
    if (seconds >= 0)
    {
@@ -90,12 +92,14 @@ int safeSelect(int socketNum, int seconds, int *triesLeft)
    /* Reset all the sockets */
    FD_ZERO(&sockets);
    FD_SET(socketNum, &sockets);
+   
    /* Wait for packets to arrive */
    if (select(socketNum + 1, &sockets, NULL, NULL, timeoutPtr) < 0)
    {
       perror("select");
       exit(-1);
    }
+   
    /* Make sure the proper socket is being used */
    if (FD_ISSET(socketNum, &sockets))
    {
@@ -113,17 +117,20 @@ int32_t receivePacket(int socketNum, uint8_t *buf, struct sockaddr *srcAddr, int
    Header header;
    int messageLen = 0;
    int addrLen = sizeof(struct sockaddr_in6);
+   
    /* Grab the whole packet based on the length specified in the header */
    if ((messageLen = safeRecvfrom(socketNum, buf, length, 0, srcAddr, &addrLen)) == 0)
    {
       fprintf(stderr, "No message! Exiting... \n");
       exit(-1);
    }
+   
    /* Verify checksum, otherwise return 0, like no packet was received */
    if (in_cksum((unsigned short *) buf, messageLen) != 0)
    {
       return 0;
    }
+   
    /* Convert the header back to host order and paste it back into the packet */
    memcpy(&header, buf, sizeof(Header));
    header.sequence = ntohl(header.sequence);
@@ -164,17 +171,21 @@ ssize_t sendPacket(int socketNum, uint32_t sequence, uint8_t flag, struct sockad
 {
    char sendBuf[MAX_BUF];
    uint8_t *bufPtr = sendBuf;
+   
    /* Prepare the header */
    Header header = createHeader(sequence, flag, sizeof(Header) + length);
    memcpy(bufPtr, &header, sizeof(Header));
    bufPtr += sizeof(Header);
+   
    /* Prepare the data buffer */
    memcpy(bufPtr, buf, length);
+   
    /* Calculate the checksum */
    int len = sizeof(Header) + length;
    uint16_t checksum = in_cksum((unsigned short *) sendBuf, len);
    header.checksum = checksum;
    memcpy(sendBuf, &header, sizeof(Header));
+   
    /* Send the packet */
    return safeSendto(socketNum, sendBuf, len, 0, srcAddr, sizeof(struct sockaddr_in6));
 }

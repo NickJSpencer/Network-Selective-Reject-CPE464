@@ -1,5 +1,4 @@
-// Client side - UDP Code				    
-// By Hugh Smith	4/1/2017		
+// Base code provided by Hugh Smith; modified by Nick Spencer
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +17,6 @@
 #include "cpe464.h"
 #include "networks.h"
 
-/* #include "libcpe464/networks/checksum.h"
- */
 #define MAXBUF 80
 #define xstr(a) str(a)
 #define str(a) #a
@@ -58,11 +55,11 @@ uint32_t sequenceNum = 0;
 
 int main (int argc, char *argv[])
  {
-	int socketNum = 0;				
-	struct sockaddr_in6 server;		// Supports 4 and 6 but requires IPv6 struct
-	int portNumber = 0;
+    int socketNum = 0;              
+    struct sockaddr_in6 server;     // Supports 4 and 6 but requires IPv6 struct
+    int portNumber = 0;
 
-	portNumber = checkArgs(argc, argv);
+    portNumber = checkArgs(argc, argv);
    
    if ((outFile = open(localFile, O_CREAT | O_TRUNC | O_WRONLY, 0600)) < 0)
    {
@@ -72,28 +69,31 @@ int main (int argc, char *argv[])
       
    sendtoErr_init(errorPercent, DROP_ON, FLIP_ON, DEBUG_OFF, RSEED_ON);
    
-	socketNum = setupUdpClientToServer(&server, remoteMachine, portNumber);
-	
-	processServer(socketNum, server);
-	
-	close(socketNum);
+    socketNum = setupUdpClientToServer(&server, remoteMachine, portNumber);
+    
+    processServer(socketNum, server);
+    
+    close(socketNum);
 }
 
 void processServer(int socketNum, struct sockaddr_in6 server)
 {
    int state = SEND_CONNECTION;
    uint8_t *buffer;
-	if ((buffer = malloc(MAX_BUF)) < 0)
+
+   if ((buffer = malloc(MAX_BUF)) < 0)
    {
       perror("malloc");
       exit(-1);
    }
+   
    Packet *packets;
    if ((packets = calloc(windowSize, sizeof(Packet))) < 0)
    {
       perror("calloc");
       exit(-1);
    }
+   
    uint32_t expectedSequence = 0;
    int srejSent = FALSE;
    int tries = 10;   
@@ -213,16 +213,19 @@ int getData(int socketNum, uint8_t *buf, struct sockaddr_in6 server)
    Header header;
    int len = receivePacket(socketNum, buf, (struct sockaddr *) &server, sizeof(Header) + bufferSize);
    memcpy(&header, buf, sizeof(Header));
+   
    /* If the data packet is bad, wait for more */
    if (len == 0)
    {
       return WAIT_ON_DATA;
    }
+   
    /* Otherwise, process the data */
    else if (header.flag = FLAG_3_DATA)
    {
       return PROCESS_DATA;
    }
+   
    /* If it is not a data packet, wait for more packets */
    return WAIT_ON_DATA;
 }
@@ -232,19 +235,23 @@ int processData(int socketNum, uint8_t *buf, struct sockaddr_in6 server, int32_t
 {
    Header header;
    uint8_t *bufPtr = buf;
+   
    /* Grab the header of the packet */
    memcpy(&header, buf, sizeof(Header));
+   
    /* If the packet is the expected packet, save it and write its contents to the file */
    if (header.sequence == *expectedSequence)
    {
       //*srejSent = FALSE;
       return processExpectedPacket(socketNum, server, buf, packets, header, windowSize, expectedSequence);
    }
+   
    /* If the packet's sequence is greater than expected, send SREJ's for the missing packets */
    else if (header.sequence > *expectedSequence)
    {
       return processOverPacket(socketNum, server, buf, packets, header, windowSize, expectedSequence, srejSent);
    }
+   
    /* If the packet's sequence is less than expected, send an SREJ if that was recently sent and/or an RR */
    else 
    {
@@ -261,6 +268,7 @@ int processExpectedPacket(int socketNum, struct sockaddr_in6 server, uint8_t *bu
       perror("malloc");
       exit(-1);
    }
+   
    /* Create and save this packet */
    Packet packet;
    memcpy(packet.buf, buf, header.length);
@@ -268,6 +276,7 @@ int processExpectedPacket(int socketNum, struct sockaddr_in6 server, uint8_t *bu
    packet.header = header;
    packet.isSREJ = FALSE;
    memcpy(&(packets[header.sequence % windowSize]), &packet, sizeof(Packet));
+   
    /* Write this packet and any other consecutive packets that already arrived with a higher sequence to the file */
    while(packet.sequence == *expectedSequence)
    {
@@ -290,6 +299,7 @@ int processExpectedPacket(int socketNum, struct sockaddr_in6 server, uint8_t *bu
       memcpy(&packet, &(packets[(*expectedSequence) % windowSize]), sizeof(Packet));
    }
    free(sendBuf);
+   
    /* If it is the last packet, make sure to close the file and exit */
    if (header.flag == FLAG_10_FINAL_DATA)
    {
@@ -309,6 +319,7 @@ int processOverPacket(int socketNum, struct sockaddr_in6 server, uint8_t *buf, P
       perror("malloc");
       exit(-1);
    }
+   
    /* If SREJ's have not yet been sent since the last expected packet arrived, send all the appropriate SREJ's */
    uint32_t i;
    Packet *prevPacket = &(packets[header.sequence % windowSize]);
@@ -324,6 +335,7 @@ int processOverPacket(int socketNum, struct sockaddr_in6 server, uint8_t *buf, P
          sequenceNum++;
       }
    }
+   
    /* Save the packet in the packet array */
    Packet packet;
    memcpy(packet.buf, buf, header.length);
@@ -332,6 +344,7 @@ int processOverPacket(int socketNum, struct sockaddr_in6 server, uint8_t *buf, P
    memcpy(&(packets[header.sequence % windowSize]), &packet, sizeof(Packet));
    
    free(sendBuf);
+   
    /* Wait for more data to come */
    return WAIT_ON_DATA;
 }
@@ -347,6 +360,7 @@ int processUnderPacket(int socketNum, struct sockaddr_in6 server, int *expectedS
    }
    
    Packet packet = packets[*expectedSequence % windowSize];
+   
    /* If an SREJ(s) has been sent since the last expected packet, send it again */
    if (packet.isSREJ)
    {      
@@ -356,6 +370,7 @@ int processUnderPacket(int socketNum, struct sockaddr_in6 server, int *expectedS
       sequenceNum++;
    }
    free(sendBuf);
+   
    /* Just to try moving the window up, resend the most recent RR */
    return RESEND_RR;
 }
@@ -457,6 +472,7 @@ int processSetupPacket(int socketNum, struct sockaddr_in6 *server, uint8_t *buf,
    
    memcpy(&header, bufPtr, sizeof(Header));
    bufPtr += sizeof(Header);
+   
    /* If the packet is not a setup packet, something went wrong, so terminate */
    if (header.flag != FLAG_2_SETUP)
    {
@@ -487,6 +503,7 @@ int processFilenameResponse(int socketNum, struct sockaddr_in6 server, uint8_t *
       {
          return SEND_FILENAME;
       }
+      
       /* If the filename is bad, print the errno message from the server */
       else if (header.flag == FLAG_8_BAD_FILENAME)
       {
@@ -506,6 +523,7 @@ int processFilenameResponse(int socketNum, struct sockaddr_in6 server, uint8_t *
       }
       return PROCESS_DATA;
    }
+   
    /* Otherwise, just resend the filename */
    else
    {
@@ -515,51 +533,59 @@ int processFilenameResponse(int socketNum, struct sockaddr_in6 server, uint8_t *
 
 /* Checks args and returns port number */
 int checkArgs(int argc, char* argv[])
-{	
-	int portNumber = 0;
+{   
+   int portNumber = 0;
    int error = 0;
+   
    /* There must be 8 args */
-	if (argc != 8)
-	{
-		fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
-	}
+   if (argc != 8)
+   {
+     fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
+     exit(-1);
+   }
+   
    /* First arg is local filename */
    memcpy(localFile, argv[1], strlen(argv[1]) + 1);
+   
    /* Then filename from server */
    memcpy(remoteFile, argv[2], strlen(argv[2]) + 1);
+   
    /* Grab windowsize */
    if ((windowSize = atoi(argv[3])) == 0)
    {
-		fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
+        fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
+        exit(-1);
    }
+   
    /* Then grab buffersize */
    if ((bufferSize = atoi(argv[4])) == 0)
    {
-		fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
+        fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
+        exit(-1);
    }
    if (bufferSize > 1400)
    {
       fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
+        exit(-1);
    }
+   
    /* Then grab errorpercent */
    errorPercent = atof(argv[5]);
    if (errorPercent <= 0 || errorPercent >= 1)
    {
-		fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
+        fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
+        exit(-1);
    }
+   
    /* Grab the remote machine */
    memcpy(remoteMachine, argv[6], strlen(argv[6]) + 1);
+   
    /* Finally, the port number */
    if ((portNumber = atoi(argv[7])) == 0)
    {
-		fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
-		exit(-1);
+        fprintf(stderr, "Usage %s: [local-file] [remote-file] [window-size] [buffer-size] [error-percent] [remote-machine] [remote-port]\n", argv[0]);
+        exit(-1);
    }
 
-	return portNumber;
+    return portNumber;
 }

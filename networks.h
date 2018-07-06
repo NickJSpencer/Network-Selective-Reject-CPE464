@@ -1,6 +1,6 @@
 
-// 	Writen - HMS April 2017
-//  Supports TCP and UDP - both client and server
+// Base code provided by Hugh Smith; modified by Nick Spencer
+// Supports TCP and UDP - both client and server
 
 
 #ifndef __NETWORKS_H__

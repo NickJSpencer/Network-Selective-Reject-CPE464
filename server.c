@@ -1,5 +1,4 @@
-/* Server side - UDP Code				    */
-/* By Hugh Smith	4/1/2017	*/
+// Base code provided by Hugh Smith; modified by Nick Spencer
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +74,7 @@ void listenForClients(int socketNum)
          perror("select");
          exit(-1);
       }
+      
       /* A new client wants to connect! */
       if (FD_ISSET(socketNum, &sockets))
       {         
@@ -86,6 +86,7 @@ void listenForClients(int socketNum)
                perror("fork");
                exit(-1);
             }
+            
             /* Child Process */
             if (pid == 0)
             {
@@ -93,6 +94,7 @@ void listenForClients(int socketNum)
                processClient(socketNum, buf, len, client);
             }
          }
+         
          /* Parent Process */
          while(waitpid(-1, &status, WNOHANG) > 0);
       }
@@ -212,21 +214,25 @@ int prepareData(int socketNum, struct sockaddr_in6 server, Packet *packets, uint
    {
       return SEND_DATA;
    }
+   
    /* If the entire window has already been prepared, just send data */
    if ((*currentPreparePacket) - (*currentRR) >= windowSize)
    {
       return SEND_DATA;
    }
+   
    /* Read the next buffer length of the data */
    if((length = read(file, data, bufferSize)) < 0)
    {
       perror("read");
       exit(-1);
    }
+   
    /*Prepare the packet to store */
    memcpy(&(packet.buf), data, length);
    packet.sequence = *currentPreparePacket;
    header.length = length;
+   
    /* If the length is the size of the bufferSize, there is still more data, so it is a normal packet */
    if (length == bufferSize) 
    {
@@ -238,10 +244,12 @@ int prepareData(int socketNum, struct sockaddr_in6 server, Packet *packets, uint
       *donePreparing = TRUE;
       lastPacket = *currentPreparePacket;
    }
+   
    /* Store the packet */
    packet.header = header;
    memcpy(&(packets[(*currentPreparePacket) % windowSize]), &packet, sizeof(Packet));
    packet = packets[(*currentPreparePacket) % windowSize];
+   
    /* Increment the next packet to prepare */
    (*currentPreparePacket)++;
    
@@ -253,22 +261,26 @@ int sendData(int socketNum, Connection *client, Packet *packets, uint32_t *curre
 {
    
    Packet packet;
+   
    /* If the packet about to be sent is less than the current RR, update currentPacket */
    if (*currentPacket < *currentRR)
    {
       *currentPacket = *currentRR;
    }
+   
    /* If there is an SREJ to process, grab that particular packet */
    if (*currentSREJ != -1)
    {
       packet = packets[(*currentSREJ) % windowSize];
       *currentSREJ = -1;
    }
+   
    /* If the window is closed */
    else if ((*currentPacket) - (*currentRR) >= windowSize)
    {
       return WAIT_FOR_ACK;
    }
+   
    /* If the packet to be sent has not been prepared yet, prepare it, or wait for ACK if the last packet has been stored */
    else if (*currentPacket >= *currentPreparePacket)
    {
@@ -283,13 +295,16 @@ int sendData(int socketNum, Connection *client, Packet *packets, uint32_t *curre
       packet = packets[(*currentPacket) % windowSize];
       (*currentPacket)++;
    }
+   
    /* Send the packet */
    sendPacket(socketNum, packet.sequence, packet.header.flag, (struct sockaddr *) &(client->remote), packet.buf, packet.header.length);
+   
    /* If it is the last packet, wait 1 sec for ACK */
    if (packet.header.flag == FLAG_10_FINAL_DATA)
    {
       return WAIT_FOR_ACK;
    }
+   
    /* otherwise, check for ACK */
    return CHECK_FOR_ACK;
 }
@@ -302,18 +317,21 @@ int processAck(int socketNum, struct sockaddr_in6 server, int *currentRR, int *c
    uint8_t buf[MAX_BUF];
    uint8_t *bufPtr = buf;
    uint32_t seq;
+   
    /* Receive the packet */
    int len = receivePacket(socketNum, bufPtr, (struct sockaddr *) &server, sizeof(Header) + sizeof(uint32_t));
    if (len == 0)
    {
       return PREPARE_DATA;
    }
+   
    /* Grab contents from the packet */
    Header header;
    memcpy(&header, bufPtr, sizeof(Header));
    bufPtr += sizeof(Header);
    memcpy(&seq, bufPtr, sizeof(seq));  
    seq = ntohl(seq);
+   
    /* If the packet is RR, make sure to update the current packet, if it is the last one, end the thread */
    if (header.flag == FLAG_5_RR)
    {
@@ -324,6 +342,7 @@ int processAck(int socketNum, struct sockaddr_in6 server, int *currentRR, int *c
       *currentRR = seq;
       return CHECK_FOR_ACK;
    }
+   
    /* If the packet is SREJ, set SREJ variable so it can be sent again immediately */
    else if (header.flag == FLAG_6_SREJ)
    {
@@ -468,19 +487,23 @@ int processSetupPacket(uint8_t *buf, int32_t len, Connection *client, int *windo
       perror("socket");
       exit(-1);
    }
+   
    /* Grab the header */
    memcpy(&header, bufPtr, sizeof(Header));
    bufPtr += sizeof(Header);
+   
    /* First packet should have flag 1, otherwise something funky is going on */
    if (header.flag != FLAG_1_SETUP)
    {
       fprintf(stderr, "Invalid first packet! Exiting... \n");
       exit(-1);
    }
+   
    /* Grab the window size and buffer size */
    memcpy(windowSize, bufPtr, sizeof(*bufferSize));
    bufPtr += sizeof(*windowSize);
    memcpy(bufferSize, bufPtr, sizeof(*bufferSize));
+   
    /* Initialize the packets based on the window size */
    if((*packets = calloc(*windowSize, sizeof(Packet))) < 0)
    {
@@ -501,6 +524,7 @@ int processFilename(int socketNum, uint8_t *buf, int *datafile, Connection *clie
    {
       return WAIT_ON_FILENAME;
    }
+   
    /* Parse filename packet */
    Header header;
    uint8_t *bufPtr = buf;
@@ -541,16 +565,19 @@ int processFilenameResponse(uint8_t *buf, Connection *client)
    {
       return SEND_FILENAME_RESPONSE;
    }
+   
    /* Parse filename response packet */
    Header header;
    uint8_t *bufPtr = buf;
    memcpy(&header, bufPtr, sizeof(Header));
    bufPtr += sizeof(Header);
+   
    /* If client has acknowledged the bad filename, end connection */
    if (header.flag == FLAG_9_END_CONNECTION)
    {
       return DONE;
    }
+   
    /* Otherwise, resend the filename response */
    return SEND_FILENAME_RESPONSE;
 }
